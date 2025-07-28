@@ -1,0 +1,267 @@
+import numpy as np
+from metrics import F1Score
+import matplotlib.pyplot as plt
+from sklearn import metrics
+import tensorflow as tf
+import seaborn as sns
+from tensorflow.keras import layers, models
+from sklearn.metrics import confusion_matrix, classification_report, roc_curve, auc, precision_recall_curve
+from data_loader import create_data_generators  
+import os
+
+#配置中文字体
+plt.rcParams['font.sans-serif'] = ['SimHei', 'WenQuanYi Micro Hei', 'Heiti TC']
+plt.rcParams['axes.unicode_minus'] = False
+
+def visualize_predictions(model, test_generator, fire_samples=5, non_fire_samples=4):
+    # 确保测试生成器处于初始状态
+    test_generator.reset()
+    original_batch_size = test_generator.batch_size
+    original_shuffle = test_generator.shuffle
+    
+    # 临时修改生成器设置
+    test_generator.shuffle = False  # 关闭 shuffle 以便按顺序获取样本
+    test_generator.batch_size = test_generator.samples  # 一次性获取所有样本
+    
+    # 获取所有测试样本
+    all_images, all_labels = next(iter(test_generator))
+    
+    # 恢复生成器原始设置
+    test_generator.batch_size = original_batch_size
+    test_generator.shuffle = original_shuffle
+    
+    # 分离火灾和非火灾样本
+    fire_indices = np.where(all_labels == 0)[0]  # 假设 0 代表火灾
+    non_fire_indices = np.where(all_labels == 1)[0]  # 假设 1 代表非火灾
+    
+    # 随机选择指定数量的样本
+    np.random.seed(None)  # 使用随机种子以确保每次运行结果不同
+    selected_fire_indices = np.random.choice(fire_indices, min(fire_samples, len(fire_indices)), replace=False)
+    selected_non_fire_indices = np.random.choice(non_fire_indices, min(non_fire_samples, len(non_fire_indices)), replace=False)
+    
+    # 合并选中的样本
+    selected_indices = np.concatenate([selected_fire_indices, selected_non_fire_indices])
+    np.random.shuffle(selected_indices)  # 打乱顺序
+    
+    images = all_images[selected_indices]
+    labels = all_labels[selected_indices]
+    num_samples = len(images)
+    print(f"实际获取的样本数量: {num_samples} (火灾: {len(selected_fire_indices)}, 非火灾: {len(selected_non_fire_indices)})")
+    
+    # 预测
+    predictions = model.predict(images)
+    predicted_labels = (predictions > 0.5).astype(int).flatten()
+    
+    # 可视化
+    plt.figure(figsize=(15, 15))
+    for i in range(num_samples):
+        plt.subplot(3, 3, i+1)
+        # 显示图像
+        img = images[i]
+        img = (img * 255).astype(np.uint8)  # 反归一化
+        plt.imshow(img)
+        
+        # 设置标题
+        true_label = '火灾' if labels[i] == 0 else '非火灾'
+        pred_label = '火灾' if predicted_labels[i] == 0 else '非火灾'
+        confidence = predictions[i][0] if predicted_labels[i] == 1 else 1 - predictions[i][0]
+        
+        title = f'真实: {true_label}\n预测: {pred_label}\n置信度: {confidence:.2f}'
+        color = 'green' if true_label == pred_label else 'red'
+        plt.title(title, color=color)
+        plt.axis('off')
+    
+    plt.tight_layout()
+    plt.savefig('predictions.png')
+    plt.close()
+    print('预测结果可视化完成，已保存为predictions.png')
+
+def evaluate_model(model_path, image_size = (224, 224), batch_size = 1):
+    #创建数据生成器
+    _, _, test_generator = create_data_generators(
+        image_size = image_size, 
+        batch_size = batch_size,
+        augment_training_data=False
+    )
+
+    #加载模型
+    print(f"正在加载模型：{model_path}")
+    model = tf.keras.models.load_model(model_path, custom_objects={'F1Score': F1Score})
+    print("模型加载完成")
+
+    #评估模型
+    print("开始模型评估")
+    # 获取模型评估结果
+    eval_results = model.evaluate(test_generator, verbose = 1)
+    
+    # 确保有足够的评估结果
+    if len(eval_results) >= 5:
+        test_loss, test_accuracy, test_auc, test_precision, test_recall = eval_results[:5]
+        print(f"测试集损失: {test_loss:.4f}")
+        print(f"测试集准确率: {test_accuracy:.4f}")
+        print(f"测试集AUC: {test_auc:.4f}")
+        print(f"测试集精确率: {test_precision:.4f}")
+        print(f"测试集召回率: {test_recall:.4f}")
+    else:
+        print(f"警告: 模型评估结果数量不足，仅获取到 {len(eval_results)} 个结果")
+        test_loss = eval_results[0] if len(eval_results) > 0 else None
+        test_accuracy = eval_results[1] if len(eval_results) > 1 else None
+        print(f"测试集损失: {test_loss:.4f}" if test_loss is not None else "测试集损失: 无法获取")
+        print(f"测试集准确率: {test_accuracy:.4f}" if test_accuracy is not None else "测试集准确率: 无法获取")
+    print("模型评估完成")
+    
+    # 调用可视化函数 - 临时使用更大的批次大小以获取更多样本
+    test_generator.batch_size = 9
+    visualize_predictions(model, test_generator)
+
+    #生成预测结果和获取真实标签（一次遍历完成）
+    print("正在生成预测结果并获取真实标签")
+    print(f"测试集样本数量: {test_generator.samples}")
+    print(f"批量大小: {batch_size}")
+    print(f"总批次数: {len(test_generator)}")
+    
+    y_pred_prob = []
+    y_true = []
+    
+    for i, (images, labels) in enumerate(test_generator):
+        print(f"处理批次 {i+1}/{len(test_generator)}")
+        # 保存真实标签
+        y_true.extend(labels)
+        # 预测
+        batch_pred = model.predict(images, verbose=0)
+        y_pred_prob.append(batch_pred)
+        # 每处理5个批次打印一次进度
+        if (i+1) % 5 == 0 or (i+1) == len(test_generator):
+            print(f"已完成 {i+1}/{len(test_generator)} 批次")
+        # 防止无限循环，添加安全检查
+        if i+1 > len(test_generator):
+            print("警告: 已超过预期批次数，强制退出循环")
+            break
+    
+    y_pred_prob = np.vstack(y_pred_prob)
+    y_true = np.array(y_true)
+    print("预测结果和真实标签获取完成")
+    y_pred = (y_pred_prob > 0.5).astype(int).flatten()
+
+    #混淆矩阵
+    print("生成混淆矩阵")
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(cm, annot=True, fmt='d', cmap= 'Blues', 
+                xticklabels = ['非火灾', '火灾'], 
+                yticklabels = ['非火灾', '火灾'])
+    plt.xlabel('预测标签')
+    plt.ylabel('真实标签')
+    plt.title('混淆矩阵')
+    plt.savefig('confusion_matrix.png')
+    plt.close()
+
+    #分类报告
+    report = classification_report(y_true, y_pred, target_names = ['非火灾', '火灾'], digits = 4)
+    print("\n分类报告")
+    print(report)
+
+    #ROC曲线
+    print("生成ROC曲线")
+    fpr, tpr, _ = roc_curve(y_true, y_pred_prob)
+    roc_auc = auc(fpr, tpr)
+
+    plt.figure(figsize=(10, 8))
+    plt.plot(fpr, tpr, color = 'darkorange', lw = 2, label = f'ROC曲线(AUC = {roc_auc:.2f})')
+    plt.plot([0, 1], [0, 1], color = 'navy', lw = 2, linestyle = '--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('假正例率')
+    plt.ylabel('真正例率')
+    plt.title('ROC曲线')
+    plt.legend(loc = 'lower right')
+    plt.savefig('roc_curve.png')
+    plt.close()
+        
+    #计算不同阈值下的精确率和召回率
+    precision, recall, thresholds = precision_recall_curve(y_true, y_pred_prob)
+
+    #绘制精确率-召回率曲线
+    plt.figure(figsize=(10, 8))
+    plt.plot(recall, precision, color = 'darkorange', lw = 2)
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('召回率')
+    plt.ylabel('精确率')
+    plt.title('精确率-召回率曲线')
+    plt.grid = True
+    plt.tight_layout()
+    plt.savefig('precision_recall_curve.png')
+    plt.close()
+
+    #找到最佳阈值（F1分数最高）
+    f1_scores = 2 * (precision * recall) / (precision + recall)
+    best_threshold = thresholds[np.argmax(f1_scores)]
+    best_f1 = np.max(f1_scores)
+    print(f"最佳阈值: {best_threshold:.4f}")
+    print(f"最佳F1分数: {best_f1:.4f}")
+
+    #使用最佳阈值重新计算评估指标
+    y_pred_best = (y_pred_prob > best_threshold).astype(int).flatten()
+    cm_best = confusion_matrix(y_true, y_pred_best)
+    report_best = classification_report(y_true, y_pred_best, target_names = ['非火灾', '火灾'], digits = 4)
+
+    return{
+        'test_loss': test_loss,
+        'test_accuracy': test_accuracy,
+        'test_auc': test_auc,
+        'test_precision': test_precision,
+        'test_recall': test_recall,
+        'confusion_matrix': cm,
+        'classification_report': report,
+        'best_threshold': best_threshold,
+        'best_f1': best_f1,
+        'confusion_matrix_best': cm_best,
+        'classification_report_best': report_best,
+    }
+
+
+
+if __name__ == '__main__':
+    print("开始模型评估")
+
+    #检查模型文件是否存在
+    model_path = 'models/final_model.keras'
+    if not os.path.exists('models/final_model.keras'):
+        print(f"模型文件不存在,请先训练模型 - {model_path}")
+        exit(1)
+
+    #评估模型
+    results = evaluate_model(model_path)
+
+    #创建保存结果的目录
+    os.makedirs('evaluation_results', exist_ok = True)
+
+    #保存评估结果到文件
+    with open('evaluation_results/evaluation_results.txt', 'w', encoding='utf-8') as f:
+        f.write("模型评估总结\n")
+        f.write("=" * 50 + "\n")
+        f.write(f"测试损失: {results['test_loss']:.4f}\n")
+        f.write(f"测试准确率: {results['test_accuracy']:.4f}\n")
+        f.write(f"测试精确率: {results['test_precision']:.4f}\n")
+        f.write(f"测试召回率: {results['test_recall']:.4f}\n")
+        f.write(f"测试AUC: {results['test_auc']:.4f}\n\n")
+        f.write(f"最佳分类阈值: {results['best_threshold']:.4f} (F1分数: {results['best_f1']:.4f})\n\n")
+        
+        f.write("混淆矩阵 (阈值=0.5):\n")
+        f.write(f"{results['confusion_matrix']}\n\n")
+        
+        f.write("分类报告 (阈值=0.5):\n")
+        f.write(f"{results['classification_report']}\n\n")
+        
+        f.write("混淆矩阵 (最佳阈值):\n")
+        f.write(f"{results['confusion_matrix_best']}\n\n")
+        
+        f.write("分类报告 (最佳阈值):\n")
+        f.write(f"{results['classification_report_best']}\n")
+    
+    print("评估完成，结果已保存到 'evaluation_results' 目录")
+    print("生成的图表:")
+    print("- confusion_matrix.png: 混淆矩阵")
+    print("- roc_curve.png: ROC曲线")
+    print("- precision_recall_curve.png: 精确率-召回率曲线")

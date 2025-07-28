@@ -1,0 +1,46 @@
+import sqlite3
+
+def view_processed_results():
+    """查看数据库中已处理的图像结果"""
+    try:
+        # 连接数据库
+        conn = sqlite3.connect('image_database.db')
+        cursor = conn.cursor()
+        print("成功连接到数据库")
+
+        # 查询已处理的图像结果
+        cursor.execute('''
+            SELECT id, filename, prediction, confidence, timestamp 
+            FROM images 
+            WHERE processed = 1 
+            ORDER BY timestamp DESC
+        ''')
+        results = cursor.fetchall()
+
+        if not results:
+            print("没有找到已处理的图像结果")
+            return
+
+        # 打印结果表头
+        print("\n已处理图像结果:\n")
+        print(f"{'ID':<5} {'文件名':<20} {'结果':<10} {'置信度':<10} {'时间戳'}")
+        print("-" * 60)  # 分隔线
+        
+        # 打印结果行
+        for row in results:
+            image_id, filename, prediction, confidence, timestamp = row
+            confidence_str = f"{confidence:.4f}" if confidence is not None else "N/A"
+            print(f"{image_id:<5} {filename:<20} {prediction:<10} {confidence_str:<10} {timestamp}")
+
+        print(f"\n共找到 {len(results)} 条已处理图像记录")
+
+    except Exception as e:
+        print(f"查询错误: {e}")
+    finally:
+        # 关闭数据库连接
+        if 'conn' in locals():
+            conn.close()
+            print("数据库连接已关闭")
+
+if __name__ == "__main__":
+    view_processed_results()

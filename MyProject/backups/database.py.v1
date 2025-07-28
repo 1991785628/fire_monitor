@@ -1,0 +1,136 @@
+import sqlite3
+import os
+import io
+from datetime import datetime
+from PIL import Image
+
+class ImageDatabase:
+    def __init__(self, db_name='image_database.db'):
+        self.db_name = db_name
+        self.conn = None
+        self.cursor = None
+        self.connect()
+        self.create_tables()
+
+    def connect(self):
+        """连接到SQLite数据库"""
+        try:
+            self.conn = sqlite3.connect(self.db_name)
+            self.cursor = self.conn.cursor()
+            print(f"成功连接到数据库: {self.db_name}")
+        except sqlite3.Error as e:
+            print(f"数据库连接错误: {e}")
+
+    def create_tables(self):
+        """创建图像数据表"""
+        try:
+            # 创建图像表
+            self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            image_data BLOB NOT NULL,
+            height INTEGER NOT NULL,
+            width INTEGER NOT NULL,
+            channels INTEGER NOT NULL,
+            timestamp DATETIME NOT NULL,
+            category TEXT,
+            prediction TEXT,
+            confidence REAL,
+            processed BOOLEAN DEFAULT 0
+        )
+            ''')
+            self.conn.commit()
+            print("图像表创建成功或已存在")
+        except sqlite3.Error as e:
+            print(f"创建表错误: {e}")
+
+    def insert_image(self, image_path, category=None, width=None, height=None, channels=None):
+        """插入图像到数据库"""
+        try:
+            # 读取图像文件
+            with Image.open(image_path) as img:
+                # 将图像转换为字节流
+                img_byte_arr = io.BytesIO()
+                img.save(img_byte_arr, format='JPEG')
+                img_byte_arr = img_byte_arr.getvalue()
+
+            # 获取文件名和当前时间戳
+            filename = os.path.basename(image_path)
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            # 插入数据库
+            self.cursor.execute('''
+            INSERT INTO images (filename, image_data, height, width, channels, timestamp, category)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (filename, img_byte_arr, height, width, channels, timestamp, category))
+            self.conn.commit()
+            print(f"成功插入图像: {filename}")
+            return True
+        except Exception as e:
+            print(f"插入图像错误: {e}")
+            return False
+
+    def get_unprocessed_images(self, limit=10):
+        """获取未处理的图像"""
+        try:
+            if limit is None:
+                self.cursor.execute('''
+                SELECT id, filename, image_data, timestamp FROM images
+                WHERE processed = 0
+                ORDER BY RANDOM()
+                ''')
+            else:
+                self.cursor.execute('''
+                SELECT id, filename, image_data, timestamp FROM images
+                WHERE processed = 0
+                ORDER BY RANDOM()
+                LIMIT ?
+                ''', (limit,))
+            return self.cursor.fetchall()
+        except sqlite3.Error as e:
+            print(f"获取未处理图像错误: {e}")
+            return []
+
+    def update_image_prediction(self, image_id, prediction, confidence):
+        """更新图像预测结果"""
+        try:
+            self.cursor.execute('''
+            UPDATE images
+            SET prediction = ?, confidence = ?, processed = 1
+            WHERE id = ?
+            ''', (prediction, confidence, image_id))
+            self.conn.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"更新预测结果错误: {e}")
+            return False
+
+    def get_image_count(self, category=None):
+        """获取图像总数"""
+        try:
+            if category:
+                self.cursor.execute('''
+                SELECT COUNT(*) FROM images
+                WHERE category = ?
+                ''', (category,))
+            else:
+                self.cursor.execute('''
+                SELECT COUNT(*) FROM images
+                ''')
+            return self.cursor.fetchone()[0]
+        except sqlite3.Error as e:
+            print(f"获取图像数量错误: {e}")
+            return 0
+
+    def close(self):
+        """关闭数据库连接"""
+        if self.conn:
+            self.conn.close()
+            print("数据库连接已关闭")
+
+if __name__ == "__main__":
+    # 测试数据库功能
+    db = ImageDatabase()
+    print(f"数据库中图像总数: {db.get_image_count()}")
+    db.close()

@@ -1,0 +1,10 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource prefix="/icons">
+    <!-- 这里可以添加应用程序所需的图标资源 -->
+    <!-- 例如: <file>icons/app_icon.png</file> -->
+  </qresource>
+  <qresource prefix="/images">
+    <!-- 这里可以添加应用程序所需的图像资源 -->
+  </qresource>
+</RCC>

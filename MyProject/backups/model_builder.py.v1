@@ -1,0 +1,84 @@
+import tensorflow as tf
+from tensorflow.keras import layers, Model
+from tensorflow.keras.applications import MobileNetV2
+import tensorflow as tf
+
+def build_fire_detection_model(input_shape = (224, 224, 3), 
+                               num_classes = 1, 
+                               use_dropout = True, 
+                               dropout_rate = 0.5, 
+                               l2_reg = 0.0005,
+                               learning_rate = 0.0001):
+
+    # 使用MobileNetV2作为基础模型，加载预训练权重
+    base_model = MobileNetV2(include_top = False, 
+                             weights = 'imagenet',  # 使用ImageNet预训练权重
+                             input_shape = input_shape,
+                             alpha=1.0)  # 恢复默认模型宽度
+
+    # 冻结所有层
+    base_model.trainable = False
+
+    # 添加注意力机制(简化版SE模块)
+    inputs = tf.keras.Input(shape = input_shape)
+    x = base_model(inputs, training = False)
+
+    # 全局平均池化
+    x = layers.GlobalAveragePooling2D()(x)
+    x = layers.BatchNormalization()(x)
+
+    # 简化的注意力机制
+    se = layers.Dense(x.shape[-1] // 32, activation = "relu")(x)
+    se = layers.Dense(x.shape[-1], activation = "sigmoid")(se)
+    x = layers.Multiply()([x, se])
+
+    # 简化全连接层结构
+    if use_dropout:
+        x = layers.Dropout(dropout_rate)(x)
+
+    x = layers.Dense(32, activation = "relu",
+                     kernel_regularizer=tf.keras.regularizers.l2(l2_reg))(x)
+    x = layers.BatchNormalization()(x)
+
+    outputs = layers.Dense(num_classes, activation = "sigmoid")(x)
+
+    model = tf.keras.Model(inputs, outputs)
+
+    # 定义Focal Loss
+    def focal_loss(gamma=2., alpha=0.25):
+        def loss(y_true, y_pred):
+            y_pred = tf.clip_by_value(y_pred, 1e-7, 1 - 1e-7)
+            ce = -y_true * tf.math.log(y_pred) - (1 - y_true) * tf.math.log(1 - y_pred)
+            weight = y_true * alpha + (1 - y_true) * (1 - alpha)
+            # 使用TensorFlow操作替代Python条件判断
+            fl = weight * tf.math.pow(1 - y_pred, gamma * y_true) * tf.math.pow(y_pred, gamma * (1 - y_true)) * ce
+            return tf.reduce_mean(fl)
+        return loss
+
+    #编译模型
+    optimizer = tf.keras.optimizers.Adam(learning_rate = learning_rate)
+    # 导入自定义F1Score指标
+    from metrics import F1Score
+    
+    model.compile(
+        optimizer = optimizer,
+        loss = focal_loss(gamma=2.0, alpha=0.8),  # 进一步增加火灾类别的权重
+        metrics = [
+            "accuracy", 
+            tf.keras.metrics.Precision(name = 'precision'),
+            tf.keras.metrics.Recall(name = 'recall'),
+            tf.keras.metrics.AUC(name = 'auc'),
+            F1Score(name = 'f1_score')
+        ]
+    )
+    
+    return model
+
+#创建模型可视化函数
+def visualize_model(model, save_path = 'fire_detection_model.png'):
+    tf.keras.utils.plot_model(model, to_file = save_path, show_shapes = True, show_layer_names = True, rankdir = 'TB', dpi = 96)
+
+if __name__ == "__main__":
+    model = build_fire_detection_model()
+    model.summary()
+    visualize_model(model)
