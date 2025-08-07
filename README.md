@@ -1,5 +1,3 @@
-# 火灾监控系统 (Fire Monitor System)
-
 ## 项目概述
 火灾监控系统是一个基于深度学习的火灾检测与风险评估平台。该系统能够通过图像识别技术检测火灾，并结合环境传感器数据进行风险评估和蔓延预测，为火灾防控提供决策支持。
 
@@ -154,6 +152,8 @@ python fire_control_system.py
 
 ### database.py
 负责图像数据的存储和管理，支持图像插入、查询和更新操作。
+
+![系统模块划分图](https://github.com/user-attachments/assets/bc4c3f7f-ca18-49da-acfe-74609d20f0c5)# 火灾监控系统 (Fire Monitor System)
 
 ## 贡献指南
 1.  Fork 本项目
