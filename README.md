@@ -12,7 +12,7 @@
 - 图像数据管理与存储
 
 ## 火灾检测流程图
-![Uploading<svg width="700" height="750" xmlns="http://www.w3.org/2000/svg">
+<svg width="700" height="750" xmlns="http://www.w3.org/2000/svg">
   <!-- 背景 -->
   <rect width="700" height="750" fill="#f9f9f9"/>
   <!-- 标题 -->
@@ -106,7 +106,7 @@
 </svg> 火灾检测流程图.svg…]()
 
 ## 系统整体架构图
-![U<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
+<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
   <!-- 背景 -->
   <rect width="100%" height="100%" fill="#f9f9f9"/>
 
